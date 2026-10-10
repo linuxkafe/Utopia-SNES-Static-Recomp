@@ -23,6 +23,8 @@ set(UTOPIA_STATIC_RECOMP_SOURCES
     generated/ut_v11_bootstrap_dispatch.c
     generated/ut_v11_cpu_dispatch_index.c
     generated/ut_v23_static_dispatch.c
+    static-audio/utopia-project-dsp/utopia_dsp.c
+    static-audio/snes9x-bapu-aot/ut_static_apu.cpp
 )
 
 # Generated sources — populated when generate target is run.
@@ -60,6 +62,8 @@ target_include_directories(utopia-static-recomp
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/internal/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/generated"
+        "${CMAKE_CURRENT_SOURCE_DIR}/static-audio/snes9x-bapu-aot"
+        "${CMAKE_CURRENT_SOURCE_DIR}/static-audio/utopia-project-dsp/include"
 )
 
 if(MSVC)
@@ -105,6 +109,20 @@ if(BUILD_TESTING)
 endif()
 
 target_compile_definitions(utopia-static-recomp PRIVATE UT_SMP_AOT)
+
+set_source_files_properties(
+    static-audio/snes9x-bapu-aot/smp/smp.cpp
+    static-audio/snes9x-bapu-aot/dsp/sdsp.cpp
+    static-audio/snes9x-bapu-aot/ut_static_apu.cpp
+    PROPERTIES COMPILE_DEFINITIONS "UT_STATIC_SDSP_PRIMITIVES"
+)
+
+set_source_files_properties(
+    static-audio/snes9x-bapu-aot/smp/smp.cpp
+    static-audio/snes9x-bapu-aot/dsp/sdsp.cpp
+    static-audio/snes9x-bapu-aot/ut_static_apu.cpp
+    PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/W0>$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-w>"
+)
 
 set_target_properties(utopia-static-recomp PROPERTIES
     OUTPUT_NAME "utopia-static-recomp")
