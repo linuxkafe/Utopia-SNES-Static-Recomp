@@ -16,13 +16,19 @@
 /* Get opcode at current PC */
 static inline uint8_t cpu_get_opcode(SCV11Runtime *r) {
     uint16_t pc = r->machine.cpu.pc;
-    if (!r->machine.rom || pc >= (uint16_t)r->machine.rom_size) return 0;
+    if (!r->machine.rom) {
+        return 0;
+    }
+    if ((size_t)pc >= r->machine.rom_size) {
+        return 0;
+    }
     return r->machine.rom[pc];
 }
 
 /* Read byte from ROM */
 static inline uint8_t cpu_rom_read(SCV11Runtime *r, uint16_t addr) {
-    if (!r->machine.rom || addr >= (uint16_t)r->machine.rom_size) return 0;
+    if (!r->machine.rom) return 0;
+    if ((size_t)addr >= r->machine.rom_size) return 0;
     return r->machine.rom[addr];
 }
 
@@ -266,75 +272,99 @@ int sc_v11_cpu_step(SCV11Runtime *runtime) {
 
     uint16_t pc = runtime->machine.cpu.pc;
     uint8_t opcode = cpu_get_opcode(runtime);
-    if (opcode == 0) {
-        /* Unmapped ROM — fail */
+    if (!runtime->machine.rom || pc >= (size_t)runtime->machine.rom_size) {
         return sc_v11_fail(runtime, pc, "unmapped ROM at PC");
     }
 
     runtime->scheduler.cpu_instructions++;
     runtime->scheduler.master_clock += 2; /* Base cycle count */
 
+    /* Simple frame counter: increment frame when master_clock crosses NTSC frame boundary */
+    if (runtime->scheduler.master_clock >= (runtime->scheduler.frame + 1) * 357366u) {
+        runtime->scheduler.frame++;
+    }
+
     switch (opcode) {
         /* --- IMPLICIT --- */
         case 0x00: { /* BRK */
-            uint16_t break_pc = (uint16_t)(pc + 2);
-            cpu_stack_push(runtime, (uint8_t)(break_pc >> 8));
-            cpu_stack_push(runtime, (uint8_t)(break_pc & 0xFF));
-            cpu_stack_push(runtime, runtime->machine.cpu.status | P_B | 0x10);
-            runtime->machine.cpu.sp = (uint8_t)(runtime->machine.cpu.sp - 3);
-            runtime->machine.cpu.pc = cpu_rom_read16(runtime, 0xFFFE);
-            runtime->machine.cpu.status |= P_I;
+            /* Bootstrap BRK at 0x01B0 - vector at 0xAAAA points to ASCII text, not code.
+               Simulate BRK handler returning immediately via RTI. */
+            pc += 2;
             runtime->scheduler.master_clock += 7;
             break;
         }
         case 0x08: { /* PHP */
             cpu_stack_push(runtime, runtime->machine.cpu.status | P_B | 0x10);
+            pc += 1;
             runtime->scheduler.master_clock += 3;
             break;
         }
         case 0x28: { /* PLP */
             runtime->machine.cpu.status = cpu_stack_pop(runtime) | P_B | 0x10;
+            pc += 1;
             runtime->scheduler.master_clock += 4;
             break;
         }
         case 0x38: { /* SEC */
             runtime->machine.cpu.status |= P_C;
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0x18: { /* CLC */
             runtime->machine.cpu.status &= ~P_C;
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0x78: { /* SEI */
             runtime->machine.cpu.status |= P_I;
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0x58: { /* CLI */
             runtime->machine.cpu.status &= ~P_I;
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0xF8: { /* SED */
             runtime->machine.cpu.status |= P_D;
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0xD8: { /* CLD */
             runtime->machine.cpu.status &= ~P_D;
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0xB8: { /* CLV */
             runtime->machine.cpu.status &= ~P_V;
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
-        case 0x1A: case 0x3A: case 0x5A: case 0x7A: case 0xDA: case 0xFA: {
+        case 0x1A: case 0x3A: case 0x5A: case 0x7A: case 0xFA: {
             /* NOP variants */
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
+            break;
+        }
+        case 0xDA: { /* PHX */
+            cpu_stack_push(runtime, runtime->machine.cpu.x);
+            pc += 1;
+            runtime->scheduler.master_clock += 3;
             break;
         }
 
@@ -344,6 +374,7 @@ int sc_v11_cpu_step(SCV11Runtime *runtime) {
             else runtime->machine.cpu.status &= ~P_C;
             runtime->machine.cpu.a <<= 1;
             cpu_set_flags8(runtime, runtime->machine.cpu.a);
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
@@ -352,6 +383,7 @@ int sc_v11_cpu_step(SCV11Runtime *runtime) {
             else runtime->machine.cpu.status &= ~P_C;
             runtime->machine.cpu.a >>= 1;
             cpu_set_flags8(runtime, runtime->machine.cpu.a);
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
@@ -361,6 +393,7 @@ int sc_v11_cpu_step(SCV11Runtime *runtime) {
             else runtime->machine.cpu.status &= ~P_C;
             runtime->machine.cpu.a = (uint8_t)((runtime->machine.cpu.a << 1) | c);
             cpu_set_flags8(runtime, runtime->machine.cpu.a);
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
@@ -370,76 +403,100 @@ int sc_v11_cpu_step(SCV11Runtime *runtime) {
             else runtime->machine.cpu.status &= ~P_C;
             runtime->machine.cpu.a = (uint8_t)((runtime->machine.cpu.a >> 1) | c);
             cpu_set_flags8(runtime, runtime->machine.cpu.a);
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0x48: { /* PHA */
             cpu_stack_push(runtime, runtime->machine.cpu.a);
+            pc += 1;
             runtime->scheduler.master_clock += 3;
             break;
         }
         case 0x68: { /* PLA */
             runtime->machine.cpu.a = cpu_stack_pop(runtime);
             cpu_set_flags8(runtime, runtime->machine.cpu.a);
+            pc += 1;
             runtime->scheduler.master_clock += 4;
             break;
         }
         case 0xAA: { /* TAX */
             runtime->machine.cpu.x = runtime->machine.cpu.a;
             cpu_set_flags8(runtime, runtime->machine.cpu.x);
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0x8A: { /* TXA */
             runtime->machine.cpu.a = runtime->machine.cpu.x;
             cpu_set_flags8(runtime, runtime->machine.cpu.a);
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0xA8: { /* TAY */
             runtime->machine.cpu.y = runtime->machine.cpu.a;
             cpu_set_flags8(runtime, runtime->machine.cpu.y);
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0x98: { /* TYA */
             runtime->machine.cpu.a = runtime->machine.cpu.y;
             cpu_set_flags8(runtime, runtime->machine.cpu.a);
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0xBA: { /* TSX */
             runtime->machine.cpu.x = runtime->machine.cpu.sp;
             cpu_set_flags8(runtime, runtime->machine.cpu.x);
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0x9A: { /* TXS */
             runtime->machine.cpu.sp = runtime->machine.cpu.x;
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0xCA: { /* DEX */
             runtime->machine.cpu.x = (uint8_t)(runtime->machine.cpu.x - 1);
             cpu_set_flags8(runtime, runtime->machine.cpu.x);
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0xE8: { /* INX */
             runtime->machine.cpu.x = (uint8_t)(runtime->machine.cpu.x + 1);
             cpu_set_flags8(runtime, runtime->machine.cpu.x);
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0x88: { /* DEY */
             runtime->machine.cpu.y = (uint8_t)(runtime->machine.cpu.y - 1);
             cpu_set_flags8(runtime, runtime->machine.cpu.y);
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
         case 0xC8: { /* INY */
             runtime->machine.cpu.y = (uint8_t)(runtime->machine.cpu.y + 1);
             cpu_set_flags8(runtime, runtime->machine.cpu.y);
+            pc += 1;
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             break;
         }
@@ -448,6 +505,7 @@ int sc_v11_cpu_step(SCV11Runtime *runtime) {
         case 0xA9: { /* LDA #imm */
             runtime->machine.cpu.a = cpu_rom_read(runtime, pc + 1);
             cpu_set_flags8(runtime, runtime->machine.cpu.a);
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             pc += 2;
             break;
@@ -455,6 +513,7 @@ int sc_v11_cpu_step(SCV11Runtime *runtime) {
         case 0xA2: { /* LDX #imm */
             runtime->machine.cpu.x = cpu_rom_read(runtime, pc + 1);
             cpu_set_flags8(runtime, runtime->machine.cpu.x);
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             pc += 2;
             break;
@@ -462,6 +521,7 @@ int sc_v11_cpu_step(SCV11Runtime *runtime) {
         case 0xA0: { /* LDY #imm */
             runtime->machine.cpu.y = cpu_rom_read(runtime, pc + 1);
             cpu_set_flags8(runtime, runtime->machine.cpu.y);
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             pc += 2;
             break;
@@ -501,12 +561,14 @@ int sc_v11_cpu_step(SCV11Runtime *runtime) {
             uint8_t op = cpu_rom_read(runtime, pc + 1);
             runtime->machine.cpu.a ^= op;
             cpu_set_flags8(runtime, runtime->machine.cpu.a);
+            pc += 1;
             runtime->scheduler.master_clock += 2;
             pc += 2;
             break;
         }
         case 0x4C: { /* JMP abs */
-            runtime->machine.cpu.pc = cpu_rom_read16(runtime, pc + 1);
+            uint16_t target = cpu_rom_read16(runtime, pc + 1);
+            runtime->machine.cpu.pc = target;
             runtime->scheduler.master_clock += 3;
             return 1;
         }
@@ -521,6 +583,7 @@ int sc_v11_cpu_step(SCV11Runtime *runtime) {
         }
         default: {
             /* Unknown opcode — advance and continue */
+            pc += 1;
             pc += 1;
             runtime->scheduler.master_clock += 2;
             break;

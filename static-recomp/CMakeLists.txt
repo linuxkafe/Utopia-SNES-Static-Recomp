@@ -99,22 +99,9 @@ if(BUILD_TESTING)
     set(UTOPIA_TEST_ROM "" CACHE FILEPATH
         "Optional exact Utopia USA ROM used only by local integration tests")
     if(UTOPIA_TEST_ROM)
-        add_executable(utopia-wram-write
-            tests/test_wram_write.c)
-        target_link_libraries(utopia-wram-write PRIVATE utopia-static-recomp)
-        target_include_directories(utopia-wram-write PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/include")
-        if(MSVC)
-            target_compile_definitions(utopia-wram-write PRIVATE
-                _CRT_SECURE_NO_WARNINGS)
-            target_compile_options(utopia-wram-write PRIVATE /W4 /WX)
-        else()
-            target_compile_options(utopia-wram-write PRIVATE
-                -Wall -Wextra -Wpedantic -Werror)
-        endif()
-        add_test(NAME utopia-wram-write
-            COMMAND utopia-wram-write "${UTOPIA_TEST_ROM}")
     endif()
+
+    add_subdirectory(tests)
 endif()
 
 target_compile_definitions(utopia-static-recomp PRIVATE UT_SMP_AOT)

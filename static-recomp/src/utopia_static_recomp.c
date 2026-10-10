@@ -16,7 +16,7 @@ static void core_logf(const UtopiaRecomp *inst, const char *event,
                       const char *fmt, ...);
 void utopia_recomp_log_close(void);
 
-#define UTOPIA_FRAME_INSTRUCTION_GUARD UINT64_C(50000)
+#define UTOPIA_FRAME_INSTRUCTION_GUARD UINT64_C(200000)
 #define UTOPIA_HOST_PCM_CAPACITY_FRAMES 65536u
 
 struct UtopiaRecomp {
@@ -305,7 +305,7 @@ static int advance_internal(UtopiaRecomp *inst, uint16_t input_mask,
                 break;
             }
             --guard;
-            if (!sc_v11_step(inst->runtime)) break;
+            if (!sc_v11_cpu_step(inst->runtime)) break;
             if (inst->runtime->scheduler.frame != guarded_frame) {
                 guarded_frame = inst->runtime->scheduler.frame;
                 guard = UTOPIA_FRAME_INSTRUCTION_GUARD;

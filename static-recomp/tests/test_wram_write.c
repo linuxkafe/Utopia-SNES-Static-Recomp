@@ -1,6 +1,7 @@
 #include "utopia_static_recomp.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 /* Contract test for the host-side WRAM write API. */
 
