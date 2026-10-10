@@ -18,6 +18,11 @@ set(UTOPIA_STATIC_RECOMP_SOURCES
     src/ut_audio_transport.c
     src/ut_v28_video.c
     src/ut_static_apu.c
+    generated/ut_audio_epoch_manifest.c
+    generated/ut_audio_scpu_access_manifest.c
+    generated/ut_v11_bootstrap_dispatch.c
+    generated/ut_v11_cpu_dispatch_index.c
+    generated/ut_v23_static_dispatch.c
 )
 
 # Generated sources — populated when generate target is run.
