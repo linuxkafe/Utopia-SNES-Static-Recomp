@@ -14,10 +14,11 @@ current_ticket: T003
 | T002 | Generate W65C816 bootstrap dispatch | done |
 | T003 | Implement full W65C816 opcode dispatch | done |
 | T004 | Write headless integration test (300 frames) | done |
-| T005 | Integrate S-SMP AOT authority | in-progress |
-| T006 | Implement S-DSP core | pending |
-| T007 | Create SDL2 Linux frontend | pending |
-| T008 | Deploy script | pending |
+| T005 | Integrate S-SMP AOT Authority | done |
+| T006 | Full S-SMP AOT generation from ROM | in-progress |
+| T007 | Implement S-DSP core | pending |
+| T008 | Create SDL2 Linux frontend | pending |
+| T009 | Deploy script | pending |
 
 ## Learning History
 _(Populated as tickets complete their learn phase.)_
