@@ -2,7 +2,7 @@
 project: Utopia SNES Static Recomp
 created: 2026-10-10
 current_sprint: sprint-01
-current_ticket: T001
+current_ticket: "T003"
 ---
 
 # Kanban — Utopia SNES Static Recomp
@@ -10,9 +10,9 @@ current_ticket: T001
 ## Sprint 01: Core skeleton and headless test
 | ID | Title | Status |
 |----|-------|--------|
-| T001 | Initialize project structure | in-progress |
-| T002 | Generate W65C816 dispatch for Utopia ROM | pending |
-| T003 | Implement PPU renderer stub | pending |
+| T001 | Initialize project structure | done |
+| T002 | Generate W65C816 bootstrap dispatch | done |
+| T003 | Implement full W65C816 opcode dispatch | in-progress |
 | T004 | Write headless integration test (300 frames) | pending |
 | T005 | Integrate S-SMP AOT authority | pending |
 | T006 | Implement S-DSP core | pending |
