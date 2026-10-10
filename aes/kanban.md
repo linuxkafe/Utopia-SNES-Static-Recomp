@@ -13,8 +13,8 @@ current_ticket: T003
 | T001 | Initialize project structure | done |
 | T002 | Generate W65C816 bootstrap dispatch | done |
 | T003 | Implement full W65C816 opcode dispatch | done |
-| T004 | Write headless integration test (300 frames) | in-progress |
-| T005 | Integrate S-SMP AOT authority | pending |
+| T004 | Write headless integration test (300 frames) | done |
+| T005 | Integrate S-SMP AOT authority | in-progress |
 | T006 | Implement S-DSP core | pending |
 | T007 | Create SDL2 Linux frontend | pending |
 | T008 | Deploy script | pending |
