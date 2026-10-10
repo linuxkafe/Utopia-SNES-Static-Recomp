@@ -1,0 +1,5 @@
+# Utopia SNES Static Recomp
+Version 0.1.0 — skeleton build
+
+This is the initial scaffold for the Utopia SNES static recompilation project.
+The core compiles but the dispatch is a stub — real generated code is pending.

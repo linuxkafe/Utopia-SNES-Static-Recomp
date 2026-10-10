@@ -1,0 +1,6 @@
+* text=auto
+*.sfc binary
+*.zip binary
+*.png binary
+*.jpg binary
+*.bmp binary

@@ -1,0 +1,11 @@
+#ifndef UT_AUDIO_CLOCK_PROFILE_H
+#define UT_AUDIO_CLOCK_PROFILE_H
+
+#include <stdint.h>
+
+#define UT_AUDIO_SMP_CLOCK_HZ 111860u
+#define UT_AUDIO_DSP_RATE_HZ 32040u
+#define UT_AUDIO_DSP_PHASES 32u
+#define UT_AUDIO_EPOCH_COUNT 64u
+
+#endif
