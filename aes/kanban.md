@@ -2,7 +2,7 @@
 project: Utopia SNES Static Recomp
 created: 2026-10-10
 current_sprint: sprint-01
-current_ticket: "T003"
+current_ticket: T003
 ---
 
 # Kanban — Utopia SNES Static Recomp

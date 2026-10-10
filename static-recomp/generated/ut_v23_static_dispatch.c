@@ -18,12 +18,11 @@ int sc_v11_static_step(SCV11Runtime *runtime) {
     uint16_t pc = runtime->machine.cpu.pc;
     uint8_t opcode = 0;
 
-    /* Read opcode from ROM */
     if (runtime->machine.rom && pc < (uint16_t)runtime->machine.rom_size) {
         opcode = runtime->machine.rom[pc];
     }
+    (void)opcode;
 
-    /* Generic fallback: advance PC and clock */
     runtime->scheduler.cpu_instructions++;
     runtime->scheduler.master_clock += 6;
     runtime->machine.cpu.pc = (uint16_t)(pc + 1);
