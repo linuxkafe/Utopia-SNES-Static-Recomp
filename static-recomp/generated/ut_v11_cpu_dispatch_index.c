@@ -35,19 +35,6 @@ static int cpu_step_generic(SCV11Runtime *runtime) {
 /* Dispatch table — one entry per PC page (0x00-0xFF) */
 static int (*dispatch_table[256])(SCV11Runtime *) = {0};
 
-int sc_v11_cpu_step(SCV11Runtime *runtime) {
-    if (!runtime || runtime->route_failed) return 0;
-
-    uint16_t pc = runtime->machine.cpu.pc;
-    uint8_t page = (uint8_t)(pc >> 8);
-
-    if (dispatch_table[page]) {
-        return dispatch_table[page](runtime);
-    }
-
-    return cpu_step_generic(runtime);
-}
-
 void ut_cpu_dispatch_init(void) {
     memset(dispatch_table, 0, sizeof(dispatch_table));
     dispatch_table[0x01] = ut_bootstrap_step;
