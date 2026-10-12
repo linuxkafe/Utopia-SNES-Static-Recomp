@@ -34,6 +34,11 @@ set(UTOPIA_GENERATED_SOURCES
     generated/ut_v23_static_dispatch.c
 )
 
+# Helper header for static dispatch
+set(UTOPIA_GENERATED_HEADERS
+    generated/ut_static_helpers.h
+)
+
 file(GLOB UTOPIA_V11_SHARD_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/generated/v11-shards/*.c")
 
@@ -102,7 +107,10 @@ if(BUILD_TESTING)
 
     set(UTOPIA_TEST_ROM "" CACHE FILEPATH
         "Optional exact Utopia USA ROM used only by local integration tests")
-    if(UTOPIA_TEST_ROM)
+    # Auto-detect the locally-extracted ROM so integration tests actually run
+    # when the (gitignored) ROM is present in this checkout.
+    if(NOT UTOPIA_TEST_ROM AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../rom/extracted/Utopia - The Creation of a Nation (USA).sfc")
+        set(UTOPIA_TEST_ROM "${CMAKE_CURRENT_SOURCE_DIR}/../rom/extracted/Utopia - The Creation of a Nation (USA).sfc")
     endif()
 
     add_subdirectory(tests)

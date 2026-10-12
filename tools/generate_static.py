@@ -646,6 +646,7 @@ class CCodeGenerator:
         self.output.append("/* Utopia W65C816 Static Dispatch - Generated */")
         self.output.append("#include \"ut_v11_runtime.h\"")
         self.output.append("#include \"ut_v11_cpu.h\"")
+        self.output.append("#include \"ut_static_helpers.h\"")
         self.output.append("#include <stdint.h>")
         self.output.append("")
 
@@ -697,12 +698,745 @@ class CCodeGenerator:
         self.output.append("")
 
     def generate_instruction(self, instr: Instruction):
-        # This is a simplified version - real implementation would generate full C code
+        """Generate C code implementing a single W65C816 instruction."""
+        mnemonic = instr.mnemonic.upper()
+        operands = instr.operands
+        bytes_hex = bytes(instr.bytes).hex().upper()
+        addr_mode = instr.addr_mode
+        next_pc = (instr.address + instr.size) & 0xFFFF
+
+        # Comment with instruction details
         self.output.append(f"    /* {instr.mnemonic} {bytes(instr.bytes).hex()} */")
-        # Real implementation would generate actual CPU emulation code
-        self.output.append(f"    /* TODO: implement {instr.mnemonic} */")
-        # Update PC
-        self.output.append(f"    runtime->machine.cpu.pc = 0x{(instr.address + instr.size) & 0xFFFF:04X}u;")
+
+        # Dispatch by mnemonic
+        handlers = {
+            'BRK': self._emit_brk,
+            'BRA': self._emit_bra,
+            'BPL': self._emit_bpl,
+            'BMI': self._emit_bmi,
+            'BVC': self._emit_bvc,
+            'BEQ': self._emit_beq,
+            'ASL': self._emit_asl,
+            'LSR': self._emit_lsr,
+            'ROL': self._emit_rol,
+            'ROR': self._emit_ror,
+            'STZ': self._emit_stz,
+            'AND': self._emit_and,
+            'ORA': self._emit_ora,
+            'EOR': self._emit_eor,
+            'ADC': self._emit_adc,
+            'SBC': self._emit_sbc,
+            'CMP': self._emit_cmp,
+            'CPX': self._emit_cpx,
+            'CPY': self._emit_cpy,
+            'LDA': self._emit_lda,
+            'LDX': self._emit_ldx,
+            'LDY': self._emit_ldy,
+            'STA': self._emit_sta,
+            'STX': self._emit_stx,
+            'STY': self._emit_sty,
+            'INC': self._emit_inc,
+            'DEC': self._emit_dec,
+            'INX': self._emit_inx,
+            'INY': self._emit_iny,
+            'DEX': self._emit_dex,
+            'DEY': self._emit_dey,
+            'PHA': self._emit_pha,
+            'PHP': self._emit_php,
+            'PHX': self._emit_phx,
+            'PHY': self._emit_phy,
+            'PLA': self._emit_pla,
+            'PLP': self._emit_plp,
+            'PLX': self._emit_plx,
+            'PLY': self._emit_ply,
+            'PHK': self._emit_phk,
+            'TAX': self._emit_tax,
+            'TAY': self._emit_tay,
+            'TXA': self._emit_txa,
+            'TYA': self._emit_tya,
+            'TXS': self._emit_txs,
+            'TSX': self._emit_tsx,
+            'TCD': self._emit_tcd,
+            'TDC': self._emit_tdc,
+            'TSD': self._emit_tsd,
+            'SED': self._emit_sed,
+            'CLD': self._emit_cld,
+            'CLC': self._emit_clc,
+            'SEC': self._emit_sec,
+            'CLI': self._emit_cli,
+            'SEI': self._emit_sei,
+            'CLV': self._emit_clv,
+            'REP': self._emit_rep,
+            'SEP': self._emit_sep,
+            'RTS': self._emit_rts,
+            'RTI': self._emit_rti,
+            'JMP': self._emit_jmp,
+            'JSR': self._emit_jsr,
+            'WDM': self._emit_wdm,
+            'MVA': self._emit_mva,
+            'MVD': self._emit_mvd,
+            'NEG': self._emit_neg,
+            'PHD': self._emit_phd,
+            'PLD': self._emit_pld,
+        }
+        
+        handler = handlers.get(mnemonic)
+        if handler:
+            handler(instr)
+        else:
+            self.output.append(f"    /* TODO: {instr.mnemonic} */")
+            self.output.append(f"    runtime->route_failed = 1; return;")
+
+        # Note: PC is updated within each emitter for control-flow instructions
+        # For non-control-flow, we don't update PC here since next instruction
+        # in block will handle it or fall-through logic handles it
+
+    # ========== ADDRESSING MODE HELPERS ==========
+
+    def _emit_addr_dp(self):
+        """Direct page (1-byte operand)"""
+        self.output.append("        uint16_t addr = (uint16_t)runtime->machine.cpu.d;")  # will be operand
+        self.output.append("        (void)addr;")
+        self.output.append("        /* direct page operand consumed */")
+        # Actually need to consume operand - this is handled by instruction bytes
+        # Let me re-think: use a simpler approach
+        pass
+
+    def _emit_effective_addr_abs(self):
+        """Absolute addressing"""
+        self.output.append("        uint16_t abs_addr = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+
+    def _emit_effective_addr_absx(self):
+        """Absolute,X addressing"""
+        self.output.append("        uint16_t absx_addr = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+        self.output.append("        if ((absx_addr & 0xFF00) != ((absx_addr + runtime->machine.cpu.x) & 0xFF00)) absx_addr += 0x100;")
+        self.output.append("        absx_addr = (absx_addr + runtime->machine.cpu.x) & 0xFFFF;")
+
+    def _emit_effective_addr_absy(self):
+        """Absolute,Y addressing"""
+        self.output.append("        uint16_t absy_addr = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+        self.output.append("        absy_addr = (absy_addr + runtime->machine.cpu.y) & 0xFFFF;")
+
+    def _emit_effective_addr_indx(self):
+        """(Indirect,X) addressing"""
+        self.output.append("        uint16_t zp_x = (runtime->machine.bytes[1] + runtime->machine.cpu.x) & 0xFF;")
+        self.output.append("        uint16_t ind_addr = rom_read(runtime, zp_x) | ((uint16_t)rom_read(runtime, (zp_x + 1) & 0xFF) << 8);")
+
+    def _emit_effective_addr_indy(self):
+        """(Indirect),Y addressing"""
+        self.output.append("        uint16_t zp = runtime->machine.bytes[1];")
+        self.output.append("        uint16_t ind_addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+        self.output.append("        ind_addr = (ind_addr + runtime->machine.cpu.y) & 0xFFFF;")
+
+    def _emit_read_operand(self, var="op"):
+        """Read operand from memory"""
+        self.output.append(f"        uint8_t {var} = rom_read(runtime, addr);")
+
+    def _emit_write_operand(self, val):
+        """Write operand to memory"""
+        self.output.append(f"        rom_write(runtime, addr, {val});")
+
+    # ========== OPCODE EMITTERS ==========
+
+    def _emit_brk(self, instr):
+        """BRK - Force Break / Software Interrupt"""
+        self.output.append("    /* BRK - software interrupt */")
+        self.output.append("    {")
+        self.output.append("        uint8_t status = runtime->machine.cpu.status | 0x10; /* B flag */")
+        self.output.append("        stack_push(runtime, (uint8_t)((runtime->machine.cpu.pc + 2) >> 8));")
+        self.output.append("        stack_push(runtime, (uint8_t)(runtime->machine.cpu.pc + 2));")
+        self.output.append("        stack_push(runtime, status);")
+        self.output.append("        runtime->machine.cpu.status |= 0x14; /* I and B flags */")
+        self.output.append("        uint16_t brk_pc = rom_read(runtime, 0xFFFE) | ((uint16_t)rom_read(runtime, 0xFFFF) << 8);")
+        self.output.append("        runtime->machine.cpu.pc = brk_pc;")
+        self.output.append("        runtime->machine.cpu.bank = 0x00;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 7;")
+        self.output.append("        runtime->scheduler.master_clock += 8;")
+        self.output.append("        return;")
+        self.output.append("    }")
+
+    def _emit_bra(self, instr):
+        """BRA - Branch Always (relative 8-bit)"""
+        offset = instr.operands[0] if instr.operands else 0
+        # Sign-extend 8-bit offset
+        if offset & 0x80:
+            offset |= 0xFF00
+        target = (instr.address + instr.size + offset) & 0xFFFF
+        self.output.append(f"    /* BRA ${offset:02X} -> ${target:04X} */")
+        self.output.append(f"    runtime->machine.cpu.pc = 0x{target:04X}u;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 3;")
+        self.output.append("    runtime->scheduler.master_clock += 3;")
+        self.output.append("    return;")
+
+    def _emit_bpl(self, instr):
+        """BPL - Branch if Positive (N=0)"""
+        offset = instr.operands[0] if instr.operands else 0
+        if offset & 0x80:
+            offset |= 0xFF00
+        target = (instr.address + instr.size + offset) & 0xFFFF
+        next_pc = (instr.address + instr.size) & 0xFFFF
+        self.output.append(f"    /* BPL -> ${target:04X} if N=0 */")
+        self.output.append("    if ((runtime->machine.cpu.status & 0x80) == 0) {")
+        self.output.append(f"        runtime->machine.cpu.pc = 0x{target:04X}u;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("        runtime->scheduler.master_clock += 4;")
+        self.output.append("    } else {")
+        self.output.append("        runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("        runtime->scheduler.master_clock += 2;")
+        self.output.append("    }")
+        self.output.append("    return;")
+
+    def _emit_asl(self, instr):
+        """ASL - Arithmetic Shift Left (accumulator or memory)"""
+        if len(instr.operands) == 0:
+            # ASL A (accumulator)
+            self.output.append("    /* ASL A */")
+            self.output.append("    {")
+            self.output.append("        uint8_t val = runtime->machine.cpu.a;")
+            self.output.append("        uint8_t carry = (val & 0x80) != 0;")
+            self.output.append("        runtime->machine.cpu.a = (val << 1) & 0xFF;")
+            self.output.append("        if (carry) runtime->machine.cpu.status |= 0x01; else runtime->machine.cpu.status &= ~0x01;")
+            self.output.append("        if ((runtime->machine.cpu.a & 0x80) != 0) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 2;")
+            self.output.append("        runtime->scheduler.master_clock += 2;")
+            self.output.append("    }")
+        else:
+            # ASL dp / ASL abs / ASL abs,X - memory operations
+            self._emit_asl_memory(instr)
+
+    def _emit_stz(self, instr):
+        """STZ - Store Zero"""
+        if instr.addr_mode == 9:  # dp
+            self.output.append("    /* STZ dp */")
+            self.output.append("    {")
+            self.output.append("        uint16_t addr = runtime->machine.bytes[1];")
+            self.output.append("        wram_write(runtime, addr, 0);")
+            self.output.append("        runtime->scheduler.cpu_instructions += 3;")
+            self.output.append("        runtime->scheduler.master_clock += 3;")
+            self.output.append("    }")
+        elif instr.addr_mode == 3:  # abs
+            self.output.append("    /* STZ abs */")
+            self.output.append("    {")
+            self.output.append("        uint16_t addr = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+            self.output.append("        wram_write(runtime, addr, 0);")
+            self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+            self.output.append("        runtime->scheduler.master_clock += 4;")
+            self.output.append("    }")
+        else:
+            self.output.append("    /* STZ stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+        return
+
+    def _emit_and(self, instr):
+        """AND - Logical AND (all addressing modes)"""
+        if instr.addr_mode == 2:  # immediate
+            val = instr.operands[0] if instr.operands else 0
+            self.output.append(f"    /* AND #${val:02X} */")
+            self.output.append(f"    runtime->machine.cpu.a &= 0x{val:02X};")
+            self.output.append("    if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("    if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+            self.output.append("    runtime->scheduler.master_clock += 2;")
+        elif instr.addr_mode in [3, 7, 8, 9]:
+            self.output.append("    /* AND memory */")
+            self.output.append("    {")
+            if instr.addr_mode == 9:  # dp
+                self.output.append("        uint16_t addr = runtime->machine.bytes[1];")
+            elif instr.addr_mode == 3:  # abs
+                self.output.append("        uint16_t addr = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+            elif instr.addr_mode == 7:  # (ind,X)
+                self.output.append("        uint16_t zp = (runtime->machine.bytes[1] + runtime->machine.cpu.x) & 0xFF;")
+                self.output.append("        uint16_t addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+            else:  # (ind),Y
+                self.output.append("        uint16_t zp = runtime->machine.bytes[1];")
+                self.output.append("        uint16_t addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+                self.output.append("        addr = (addr + runtime->machine.cpu.y) & 0xFFFF;")
+            self.output.append("        uint8_t op = rom_read(runtime, addr);")
+            self.output.append("        runtime->machine.cpu.a &= op;")
+            self.output.append("        if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            cyc = {9: 3, 3: 4, 7: 6, 8: 5}.get(instr.addr_mode, 4)
+            self.output.append(f"        runtime->scheduler.cpu_instructions += {cyc};")
+            self.output.append(f"        runtime->scheduler.master_clock += {cyc};")
+            self.output.append("    }")
+        else:
+            self.output.append("    /* AND stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_phk(self, instr):
+        """PHK - Push Program Bank Register"""
+        self.output.append("    /* PHK */")
+        self.output.append("    stack_push(runtime, runtime->machine.cpu.bank);")
+        self.output.append("    runtime->scheduler.cpu_instructions += 3;")
+        self.output.append("    runtime->scheduler.master_clock += 3;")
+
+    def _emit_tsd(self, instr):
+        """TSD - Transfer Stack to Direct"""
+        self.output.append("    /* TSD - Transfer Stack Pointer to Direct Page */")
+        self.output.append("    runtime->machine.cpu.d = runtime->machine.cpu.sp;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_lda(self, instr):
+        """LDA - Load Accumulator (all addressing modes)"""
+        operands = instr.operands
+        if len(operands) == 0:
+            self.output.append("    /* LDA (no operand) */")
+            self.output.append("    runtime->route_failed = 1; return;")
+        elif instr.addr_mode == 2:  # immediate
+            val = operands[0] if len(operands) > 0 else 0
+            self.output.append(f"    /* LDA #${val:02X} */")
+            self.output.append(f"    runtime->machine.cpu.a = 0x{val:02X};")
+            self.output.append("    if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("    if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+            self.output.append("    runtime->scheduler.master_clock += 2;")
+        elif instr.addr_mode == 9:  # direct page
+            self.output.append("    /* LDA dp */")
+            self.output.append("    {")
+            self.output.append("        uint16_t addr = runtime->machine.bytes[1];")
+            self.output.append("        runtime->machine.cpu.a = rom_read(runtime, addr);")
+            self.output.append("        if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 3;")
+            self.output.append("        runtime->scheduler.master_clock += 3;")
+            self.output.append("    }")
+        elif instr.addr_mode == 3:  # absolute
+            self.output.append("    /* LDA abs */")
+            self.output.append("    {")
+            self.output.append("        uint16_t addr = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+            self.output.append("        runtime->machine.cpu.a = rom_read(runtime, addr);")
+            self.output.append("        if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+            self.output.append("        runtime->scheduler.master_clock += 4;")
+            self.output.append("    }")
+        elif instr.addr_mode == 7:  # (ind,X)
+            self.output.append("    /* LDA (ind,X) */")
+            self.output.append("    {")
+            self.output.append("        uint16_t zp = (runtime->machine.bytes[1] + runtime->machine.cpu.x) & 0xFF;")
+            self.output.append("        uint16_t addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+            self.output.append("        runtime->machine.cpu.a = rom_read(runtime, addr);")
+            self.output.append("        if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 6;")
+            self.output.append("        runtime->scheduler.master_clock += 6;")
+            self.output.append("    }")
+        elif instr.addr_mode == 8:  # (ind),Y
+            self.output.append("    /* LDA (ind),Y */")
+            self.output.append("    {")
+            self.output.append("        uint16_t zp = runtime->machine.bytes[1];")
+            self.output.append("        uint16_t addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+            self.output.append("        addr = (addr + runtime->machine.cpu.y) & 0xFFFF;")
+            self.output.append("        runtime->machine.cpu.a = rom_read(runtime, addr);")
+            self.output.append("        if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 5;")
+            self.output.append("        runtime->scheduler.master_clock += 5;")
+            self.output.append("    }")
+        else:
+            self.output.append(f"    /* LDA mode={instr.addr_mode} - stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_sed(self, instr):
+        """SED - Set Decimal Flag"""
+        self.output.append("    /* SED - Set Decimal Mode */")
+        self.output.append("    runtime->machine.cpu.status |= 0x08;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_tcd(self, instr):
+        """TCD - Transfer Accumulator to Direct Page Register"""
+        self.output.append("    /* TCD - Transfer A to Direct Page */")
+        self.output.append("    runtime->machine.cpu.d = runtime->machine.cpu.a;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_sei(self, instr):
+        """SEI - Set Interrupt Disable"""
+        self.output.append("    /* SEI - Disable Interrupts */")
+        self.output.append("    runtime->machine.cpu.status |= 0x04;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_inc(self, instr):
+        """INC - Increment Memory/Register"""
+        if instr.addr_mode == 9:  # dp
+            self.output.append("    /* INC dp */")
+            self.output.append("    {")
+            self.output.append("        uint16_t addr = runtime->machine.bytes[1];")
+            self.output.append("        uint8_t val = wram_read(runtime, addr);")
+            self.output.append("        val++;")
+            self.output.append("        wram_write(runtime, addr, val);")
+            self.output.append("        if (val & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (val == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 5;")
+            self.output.append("        runtime->scheduler.master_clock += 5;")
+            self.output.append("    }")
+        elif instr.addr_mode == 3:  # abs
+            self.output.append("    /* INC abs */")
+            self.output.append("    {")
+            self.output.append("        uint16_t addr = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+            self.output.append("        uint8_t val = wram_read(runtime, addr);")
+            self.output.append("        val++;")
+            self.output.append("        wram_write(runtime, addr, val);")
+            self.output.append("        if (val & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (val == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 6;")
+            self.output.append("        runtime->scheduler.master_clock += 6;")
+            self.output.append("    }")
+        elif instr.addr_mode == 4:  # abs,X
+            self.output.append("    /* INC abs,X */")
+            self.output.append("    {")
+            self.output.append("        uint16_t base = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+            self.output.append("        uint16_t addr = (base + runtime->machine.cpu.x) & 0xFFFF;")
+            self.output.append("        uint8_t val = wram_read(runtime, addr);")
+            self.output.append("        val++;")
+            self.output.append("        wram_write(runtime, addr, val);")
+            self.output.append("        if (val & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (val == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 7;")
+            self.output.append("        runtime->scheduler.master_clock += 7;")
+            self.output.append("    }")
+        else:
+            self.output.append("    /* INC stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_wdm(self, instr):
+        """WDM - Reserved (No Operation)"""
+        self.output.append("    /* WDM - Reserved */")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_ror(self, instr):
+        """ROR - Rotate Right"""
+        if len(instr.operands) == 0:
+            self.output.append("    /* ROR A */")
+            self.output.append("    {")
+            self.output.append("        uint8_t val = runtime->machine.cpu.a;")
+            self.output.append("        uint8_t carry = val & 0x01;")
+            self.output.append("        uint8_t new_carry = (runtime->machine.cpu.status & 0x01) != 0;")
+            self.output.append("        runtime->machine.cpu.a = (val >> 1) | (new_carry << 7);")
+            self.output.append("        if (carry) runtime->machine.cpu.status |= 0x01; else runtime->machine.cpu.status &= ~0x01;")
+            self.output.append("        if ((runtime->machine.cpu.a & 0x80) != 0) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 2;")
+            self.output.append("        runtime->scheduler.master_clock += 2;")
+            self.output.append("    }")
+        else:
+            self.output.append("    /* ROR memory */")
+            self.output.append("    runtime->route_failed = 1;  /* TODO: ROR memory */")
+            self.output.append("    return;")
+
+    def _emit_bvc(self, instr):
+        """BVC - Branch if Overflow Clear"""
+        offset = instr.operands[0] if instr.operands else 0
+        if offset & 0x80:
+            offset |= 0xFF00
+        target = (instr.address + instr.size + offset) & 0xFFFF
+        self.output.append(f"    /* BVC -> ${target:04X} if V=0 */")
+        self.output.append("    if ((runtime->machine.cpu.status & 0x40) == 0) {")
+        self.output.append(f"        runtime->machine.cpu.pc = 0x{target:04X}u;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("        runtime->scheduler.master_clock += 4;")
+        self.output.append("    } else {")
+        self.output.append("        runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("        runtime->scheduler.master_clock += 2;")
+        self.output.append("    }")
+        self.output.append("    return;")
+
+    def _emit_ldx(self, instr):
+        """LDX - Load X Register"""
+        if instr.addr_mode == 2:  # immediate
+            val = instr.operands[0] if instr.operands else 0
+            self.output.append(f"    /* LDX #${val:02X} */")
+            self.output.append(f"    runtime->machine.cpu.x = 0x{val:02X};")
+            self.output.append("    if (runtime->machine.cpu.x & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("    if (runtime->machine.cpu.x == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+            self.output.append("    runtime->scheduler.master_clock += 2;")
+        elif instr.addr_mode in [3, 7, 8, 9]:
+            self.output.append("    /* LDX memory */")
+            self.output.append("    {")
+            if instr.addr_mode == 9:
+                self.output.append("        uint16_t addr = runtime->machine.bytes[1];")
+            elif instr.addr_mode == 3:
+                self.output.append("        uint16_t addr = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+            elif instr.addr_mode == 7:
+                self.output.append("        uint16_t zp = (runtime->machine.bytes[1] + runtime->machine.cpu.x) & 0xFF;")
+                self.output.append("        uint16_t addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+            else:
+                self.output.append("        uint16_t zp = runtime->machine.bytes[1];")
+                self.output.append("        uint16_t addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+                self.output.append("        addr = (addr + runtime->machine.cpu.y) & 0xFFFF;")
+            self.output.append("        runtime->machine.cpu.x = rom_read(runtime, addr);")
+            self.output.append("        if (runtime->machine.cpu.x & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (runtime->machine.cpu.x == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            cyc = {9: 3, 3: 4, 7: 6, 8: 5}.get(instr.addr_mode, 4)
+            self.output.append(f"        runtime->scheduler.cpu_instructions += {cyc};")
+            self.output.append(f"        runtime->scheduler.master_clock += {cyc};")
+            self.output.append("    }")
+        else:
+            self.output.append("    /* LDX stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_cpy(self, instr):
+        """CPY - Compare Y Register"""
+        if instr.addr_mode == 2:  # immediate
+            val = instr.operands[0] if instr.operands else 0
+            self.output.append(f"    /* CPY #${val:02X} */")
+            self.output.append("    {")
+            self.output.append("        int diff = (int)runtime->machine.cpu.y - (int)0x{:02X};".format(val))
+            self.output.append("        if (diff >= 0) runtime->machine.cpu.status |= 0x01; else runtime->machine.cpu.status &= ~0x01;")
+            self.output.append("        if (diff & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (diff == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 2;")
+            self.output.append("        runtime->scheduler.master_clock += 2;")
+            self.output.append("    }")
+        elif instr.addr_mode in [3, 7, 8, 9]:
+            self.output.append("    /* CPY memory */")
+            self.output.append("    {")
+            if instr.addr_mode == 9:
+                self.output.append("        uint16_t addr = runtime->machine.bytes[1];")
+            elif instr.addr_mode == 3:
+                self.output.append("        uint16_t addr = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+            elif instr.addr_mode == 7:
+                self.output.append("        uint16_t zp = (runtime->machine.bytes[1] + runtime->machine.cpu.x) & 0xFF;")
+                self.output.append("        uint16_t addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+            else:
+                self.output.append("        uint16_t zp = runtime->machine.bytes[1];")
+                self.output.append("        uint16_t addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+                self.output.append("        addr = (addr + runtime->machine.cpu.y) & 0xFFFF;")
+            self.output.append("        uint8_t op = rom_read(runtime, addr);")
+            self.output.append("        int diff = (int)runtime->machine.cpu.y - (int)op;")
+            self.output.append("        if (diff >= 0) runtime->machine.cpu.status |= 0x01; else runtime->machine.cpu.status &= ~0x01;")
+            self.output.append("        if (diff & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (diff == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            cyc = {9: 3, 3: 4, 7: 6, 8: 5}.get(instr.addr_mode, 4)
+            self.output.append(f"        runtime->scheduler.cpu_instructions += {cyc};")
+            self.output.append(f"        runtime->scheduler.master_clock += {cyc};")
+            self.output.append("    }")
+        else:
+            self.output.append("    /* CPY stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_ora(self, instr):
+        """ORA - Logical OR (all addressing modes)"""
+        if instr.addr_mode == 2:  # immediate
+            val = instr.operands[0] if instr.operands else 0
+            self.output.append(f"    /* ORA #${val:02X} */")
+            self.output.append(f"    runtime->machine.cpu.a |= 0x{val:02X};")
+            self.output.append("    if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("    if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+            self.output.append("    runtime->scheduler.master_clock += 2;")
+        elif instr.addr_mode in [3, 7, 8, 9]:
+            self.output.append("    /* ORA memory */")
+            self.output.append("    {")
+            if instr.addr_mode == 9:  # dp
+                self.output.append("        uint16_t addr = runtime->machine.bytes[1];")
+            elif instr.addr_mode == 3:  # abs
+                self.output.append("        uint16_t addr = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+            elif instr.addr_mode == 7:  # (ind,X)
+                self.output.append("        uint16_t zp = (runtime->machine.bytes[1] + runtime->machine.cpu.x) & 0xFF;")
+                self.output.append("        uint16_t addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+            else:  # (ind),Y
+                self.output.append("        uint16_t zp = runtime->machine.bytes[1];")
+                self.output.append("        uint16_t addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+                self.output.append("        addr = (addr + runtime->machine.cpu.y) & 0xFFFF;")
+            self.output.append("        uint8_t op = rom_read(runtime, addr);")
+            self.output.append("        runtime->machine.cpu.a |= op;")
+            self.output.append("        if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            cyc = {9: 3, 3: 4, 7: 6, 8: 5}.get(instr.addr_mode, 4)
+            self.output.append(f"        runtime->scheduler.cpu_instructions += {cyc};")
+            self.output.append(f"        runtime->scheduler.master_clock += {cyc};")
+            self.output.append("    }")
+        else:
+            self.output.append("    /* ORA stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_phx(self, instr):
+        """PHX - Push X Register"""
+        self.output.append("    /* PHX */")
+        self.output.append("    stack_push(runtime, runtime->machine.cpu.x);")
+        self.output.append("    runtime->scheduler.cpu_instructions += 3;")
+        self.output.append("    runtime->scheduler.master_clock += 3;")
+
+    def _emit_cpx(self, instr):
+        """CPX - Compare X Register"""
+        if instr.addr_mode == 2:  # immediate
+            val = instr.operands[0] if instr.operands else 0
+            self.output.append(f"    /* CPX #${val:02X} */")
+            self.output.append("    {")
+            self.output.append("        int diff = (int)runtime->machine.cpu.x - (int)0x{:02X};".format(val))
+            self.output.append("        if (diff >= 0) runtime->machine.cpu.status |= 0x01; else runtime->machine.cpu.status &= ~0x01;")
+            self.output.append("        if (diff & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (diff == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 2;")
+            self.output.append("        runtime->scheduler.master_clock += 2;")
+            self.output.append("    }")
+        elif instr.addr_mode in [3, 7, 8, 9]:
+            self.output.append("    /* CPX memory */")
+            self.output.append("    {")
+            if instr.addr_mode == 9:
+                self.output.append("        uint16_t addr = runtime->machine.bytes[1];")
+            elif instr.addr_mode == 3:
+                self.output.append("        uint16_t addr = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+            elif instr.addr_mode == 7:
+                self.output.append("        uint16_t zp = (runtime->machine.bytes[1] + runtime->machine.cpu.x) & 0xFF;")
+                self.output.append("        uint16_t addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+            else:
+                self.output.append("        uint16_t zp = runtime->machine.bytes[1];")
+                self.output.append("        uint16_t addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+                self.output.append("        addr = (addr + runtime->machine.cpu.y) & 0xFFFF;")
+            self.output.append("        uint8_t op = rom_read(runtime, addr);")
+            self.output.append("        int diff = (int)runtime->machine.cpu.x - (int)op;")
+            self.output.append("        if (diff >= 0) runtime->machine.cpu.status |= 0x01; else runtime->machine.cpu.status &= ~0x01;")
+            self.output.append("        if (diff & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (diff == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            cyc = {9: 3, 3: 4, 7: 6, 8: 5}.get(instr.addr_mode, 4)
+            self.output.append(f"        runtime->scheduler.cpu_instructions += {cyc};")
+            self.output.append(f"        runtime->scheduler.master_clock += {cyc};")
+            self.output.append("    }")
+        else:
+            self.output.append("    /* CPX stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_rep(self, instr):
+        """REP - Reset Status Bits"""
+        mask = instr.operands[0] if instr.operands else 0
+        self.output.append(f"    /* REP #${mask:02X} */")
+        self.output.append(f"    runtime->machine.cpu.status &= ~0x{mask:02X};")
+        self.output.append("    runtime->scheduler.cpu_instructions += 3;")
+        self.output.append("    runtime->scheduler.master_clock += 3;")
+
+    def _emit_phd(self, instr):
+        """PHD - Push Direct Page Register"""
+        self.output.append("    /* PHD */")
+        self.output.append("    stack_push(runtime, (uint8_t)(runtime->machine.cpu.d >> 8));")
+        self.output.append("    stack_push(runtime, (uint8_t)runtime->machine.cpu.d);")
+        self.output.append("    runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("    runtime->scheduler.master_clock += 4;")
+
+    def _emit_sta(self, instr):
+        """STA - Store Accumulator (all addressing modes)"""
+        if instr.addr_mode == 9:  # direct page
+            self.output.append("    /* STA dp */")
+            self.output.append("    {")
+            self.output.append("        uint16_t addr = runtime->machine.bytes[1];")
+            self.output.append("        wram_write(runtime, addr, runtime->machine.cpu.a);")
+            self.output.append("        io_write(runtime, addr, runtime->machine.cpu.a);")
+            self.output.append("        runtime->scheduler.cpu_instructions += 3;")
+            self.output.append("        runtime->scheduler.master_clock += 3;")
+            self.output.append("    }")
+        elif instr.addr_mode == 3:  # absolute
+            self.output.append("    /* STA abs */")
+            self.output.append("    {")
+            self.output.append("        uint16_t addr = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+            self.output.append("        wram_write(runtime, addr, runtime->machine.cpu.a);")
+            self.output.append("        io_write(runtime, addr, runtime->machine.cpu.a);")
+            self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+            self.output.append("        runtime->scheduler.master_clock += 4;")
+            self.output.append("    }")
+        elif instr.addr_mode == 7:  # (ind,X)
+            self.output.append("    /* STA (ind,X) */")
+            self.output.append("    {")
+            self.output.append("        uint16_t zp = (runtime->machine.bytes[1] + runtime->machine.cpu.x) & 0xFF;")
+            self.output.append("        uint16_t addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+            self.output.append("        wram_write(runtime, addr, runtime->machine.cpu.a);")
+            self.output.append("        io_write(runtime, addr, runtime->machine.cpu.a);")
+            self.output.append("        runtime->scheduler.cpu_instructions += 6;")
+            self.output.append("        runtime->scheduler.master_clock += 6;")
+            self.output.append("    }")
+        elif instr.addr_mode == 8:  # (ind),Y
+            self.output.append("    /* STA (ind),Y */")
+            self.output.append("    {")
+            self.output.append("        uint16_t zp = runtime->machine.bytes[1];")
+            self.output.append("        uint16_t addr = rom_read(runtime, zp) | ((uint16_t)rom_read(runtime, (zp + 1) & 0xFF) << 8);")
+            self.output.append("        addr = (addr + runtime->machine.cpu.y) & 0xFFFF;")
+            self.output.append("        wram_write(runtime, addr, runtime->machine.cpu.a);")
+            self.output.append("        io_write(runtime, addr, runtime->machine.cpu.a);")
+            self.output.append("        runtime->scheduler.cpu_instructions += 6;")
+            self.output.append("        runtime->scheduler.master_clock += 6;")
+            self.output.append("    }")
+        else:
+            self.output.append(f"    /* STA mode={instr.addr_mode} - stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_rts(self, instr):
+        """RTS - Return from Subroutine"""
+        self.output.append("    /* RTS */")
+        self.output.append("    {")
+        self.output.append("        uint16_t pc_lo = stack_pop(runtime);")
+        self.output.append("        uint16_t pc_hi = stack_pop(runtime);")
+        self.output.append("        runtime->machine.cpu.pc = (uint16_t)((pc_hi << 8) | pc_lo) + 1;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 6;")
+        self.output.append("        runtime->scheduler.master_clock += 6;")
+        self.output.append("        return;")
+        self.output.append("    }")
+
+    def _emit_neg(self, instr):
+        """NEG - Negate Memory"""
+        self.output.append("    /* NEG */")
+        self.output.append("    runtime->route_failed = 1;  /* TODO: implement NEG */")
+        self.output.append("    return;")
+
+    def _emit_asl_memory(self, instr):
+        """ASL memory (dp, abs, abs,X, dp,X)"""
+        if instr.addr_mode == 9:  # dp
+            self.output.append("    /* ASL dp */")
+            self.output.append("    {")
+            self.output.append("        uint16_t addr = runtime->machine.bytes[1];")
+            self.output.append("        uint8_t val = wram_read(runtime, addr);")
+            self.output.append("        uint8_t carry = (val & 0x80) != 0;")
+            self.output.append("        val = (val << 1) & 0xFF;")
+            self.output.append("        wram_write(runtime, addr, val);")
+            self.output.append("        if (carry) runtime->machine.cpu.status |= 0x01; else runtime->machine.cpu.status &= ~0x01;")
+            self.output.append("        if (val & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (val == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 5;")
+            self.output.append("        runtime->scheduler.master_clock += 5;")
+            self.output.append("    }")
+        elif instr.addr_mode == 3:  # abs
+            self.output.append("    /* ASL abs */")
+            self.output.append("    {")
+            self.output.append("        uint16_t addr = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+            self.output.append("        uint8_t val = wram_read(runtime, addr);")
+            self.output.append("        uint8_t carry = (val & 0x80) != 0;")
+            self.output.append("        val = (val << 1) & 0xFF;")
+            self.output.append("        wram_write(runtime, addr, val);")
+            self.output.append("        if (carry) runtime->machine.cpu.status |= 0x01; else runtime->machine.cpu.status &= ~0x01;")
+            self.output.append("        if (val & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (val == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 6;")
+            self.output.append("        runtime->scheduler.master_clock += 6;")
+            self.output.append("    }")
+        elif instr.addr_mode == 4:  # abs,X
+            self.output.append("    /* ASL abs,X */")
+            self.output.append("    {")
+            self.output.append("        uint16_t base = runtime->machine.bytes[1] | ((uint16_t)runtime->machine.bytes[2] << 8);")
+            self.output.append("        uint16_t addr = (base + runtime->machine.cpu.x) & 0xFFFF;")
+            self.output.append("        uint8_t val = wram_read(runtime, addr);")
+            self.output.append("        uint8_t carry = (val & 0x80) != 0;")
+            self.output.append("        val = (val << 1) & 0xFF;")
+            self.output.append("        wram_write(runtime, addr, val);")
+            self.output.append("        if (carry) runtime->machine.cpu.status |= 0x01; else runtime->machine.cpu.status &= ~0x01;")
+            self.output.append("        if (val & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (val == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 7;")
+            self.output.append("        runtime->scheduler.master_clock += 7;")
+            self.output.append("    }")
+        else:
+            self.output.append("    /* ASL memory stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_store_zero(self, instr):
+        """STZ - Store Zero to memory"""
+        self.output.append("    /* STZ memory */")
+        self.output.append("    runtime->route_failed = 1;  /* TODO: STZ memory */")
+        self.output.append("    return;")
 
     def generate_dispatch_table(self):
         self.output.append("")
@@ -742,6 +1476,406 @@ class CCodeGenerator:
         self.output.append("}")
 
 
+    def _emit_eor(self, instr):
+        """EOR - Exclusive OR"""
+        self.output.append("    /* EOR */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_bmi(self, instr):
+        """BMI - Branch if Minus (N=1)"""
+        offset = instr.operands[0] if instr.operands else 0
+        if offset & 0x80: offset |= 0xFF00
+        target = (instr.address + instr.size + offset) & 0xFFFF
+        self.output.append(f"    /* BMI -> ${target:04X} if N=1 */")
+        self.output.append("    if ((runtime->machine.cpu.status & 0x80) != 0) {")
+        self.output.append(f"        runtime->machine.cpu.pc = 0x{target:04X}u;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("        runtime->scheduler.master_clock += 4;")
+        self.output.append("    } else {")
+        self.output.append("        runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("        runtime->scheduler.master_clock += 2;")
+        self.output.append("    }")
+        self.output.append("    return;")
+
+    def _emit_beq(self, instr):
+        """BEQ - Branch if Equal (Z=1)"""
+        offset = instr.operands[0] if instr.operands else 0
+        if offset & 0x80: offset |= 0xFF00
+        target = (instr.address + instr.size + offset) & 0xFFFF
+        self.output.append(f"    /* BEQ -> ${target:04X} if Z=1 */")
+        self.output.append("    if ((runtime->machine.cpu.status & 0x02) != 0) {")
+        self.output.append(f"        runtime->machine.cpu.pc = 0x{target:04X}u;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("        runtime->scheduler.master_clock += 4;")
+        self.output.append("    } else {")
+        self.output.append("        runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("        runtime->scheduler.master_clock += 2;")
+        self.output.append("    }")
+        self.output.append("    return;")
+
+    def _emit_dey(self, instr):
+        """DEY - Decrement Y"""
+        self.output.append("    /* DEY */")
+        self.output.append("    runtime->machine.cpu.y = (runtime->machine.cpu.y - 1) & 0xFFFF;")
+        self.output.append("    if (runtime->machine.cpu.y & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.y == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_dex(self, instr):
+        """DEX - Decrement X"""
+        self.output.append("    /* DEX */")
+        self.output.append("    runtime->machine.cpu.x = (runtime->machine.cpu.x - 1) & 0xFFFF;")
+        self.output.append("    if (runtime->machine.cpu.x & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.x == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_sbc(self, instr):
+        """SBC - Subtract with Carry"""
+        self.output.append("    /* SBC */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_sep(self, instr):
+        """SEP - Set Status Bits"""
+        mask = instr.operands[0] if instr.operands else 0
+        self.output.append(f"    /* SEP #${mask:02X} */")
+        self.output.append(f"    runtime->machine.cpu.status |= 0x{mask:02X};")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_rti(self, instr):
+        """RTI - Return from Interrupt"""
+        self.output.append("    /* RTI */")
+        self.output.append("    {")
+        self.output.append("        uint8_t status = stack_pop(runtime);")
+        self.output.append("        uint16_t pc_lo = stack_pop(runtime);")
+        self.output.append("        uint16_t pc_hi = stack_pop(runtime);")
+        self.output.append("        runtime->machine.cpu.pc = (uint16_t)((pc_hi << 8) | pc_lo);")
+        self.output.append("        runtime->machine.cpu.status = (status & ~0x30) | 0x20; /* clear B, set U */")
+        self.output.append("        runtime->scheduler.cpu_instructions += 6;")
+        self.output.append("        runtime->scheduler.master_clock += 6;")
+        self.output.append("        return;")
+        self.output.append("    }")
+
+    def _emit_phy(self, instr):
+        """PHY - Push Y"""
+        self.output.append("    /* PHY */")
+        self.output.append("    stack_push(runtime, (uint8_t)runtime->machine.cpu.y);")
+        self.output.append("    runtime->scheduler.cpu_instructions += 3;")
+        self.output.append("    runtime->scheduler.master_clock += 3;")
+
+    def _emit_php(self, instr):
+        """PHP - Push Processor Status"""
+        self.output.append("    /* PHP */")
+        self.output.append("    stack_push(runtime, runtime->machine.cpu.status | 0x30); /* B and U always 1 */")
+        self.output.append("    runtime->scheduler.cpu_instructions += 3;")
+        self.output.append("    runtime->scheduler.master_clock += 3;")
+
+    def _emit_mva(self, instr):
+        """MVA - Move Accumulator (placeholder)"""
+        self.output.append("    /* MVA - nop */")
+        self.output.append("    runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("    runtime->scheduler.master_clock += 4;")
+
+    def _emit_mvd(self, instr):
+        """MVD - Move Direct (placeholder)"""
+        self.output.append("    /* MVD - nop */")
+        self.output.append("    runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("    runtime->scheduler.master_clock += 4;")
+
+    def _emit_neg(self, instr):
+        """NEG - Negate (2's complement)"""
+        self.output.append("    /* NEG */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    # Additional opcode handlers
+    def _emit_lsr(self, instr):
+        """LSR - Logical Shift Right"""
+        if len(instr.operands) == 0:
+            self.output.append("    /* LSR A */")
+            self.output.append("    {")
+            self.output.append("        uint8_t val = runtime->machine.cpu.a;")
+            self.output.append("        uint8_t carry = val & 0x01;")
+            self.output.append("        runtime->machine.cpu.a = val >> 1;")
+            self.output.append("        if (carry) runtime->machine.cpu.status |= 0x01; else runtime->machine.cpu.status &= ~0x01;")
+            self.output.append("        if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 2;")
+            self.output.append("        runtime->scheduler.master_clock += 2;")
+            self.output.append("    }")
+        else:
+            self.output.append("    /* LSR memory - stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_rol(self, instr):
+        """ROL - Rotate Left"""
+        if len(instr.operands) == 0:
+            self.output.append("    /* ROL A */")
+            self.output.append("    {")
+            self.output.append("        uint8_t val = runtime->machine.cpu.a;")
+            self.output.append("        uint8_t carry = val & 0x80;")
+            self.output.append("        uint8_t new_carry = (runtime->machine.cpu.status & 0x01) != 0;")
+            self.output.append("        runtime->machine.cpu.a = (val << 1) | new_carry;")
+            self.output.append("        if (carry) runtime->machine.cpu.status |= 0x01; else runtime->machine.cpu.status &= ~0x01;")
+            self.output.append("        if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 2;")
+            self.output.append("        runtime->scheduler.master_clock += 2;")
+            self.output.append("    }")
+        else:
+            self.output.append("    /* ROL memory - stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_adc(self, instr):
+        """ADC - Add with Carry"""
+        self.output.append("    /* ADC - stub */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_sbc(self, instr):
+        """SBC - Subtract with Carry"""
+        self.output.append("    /* SBC - stub */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_cmp(self, instr):
+        """CMP - Compare Accumulator"""
+        self.output.append("    /* CMP - stub */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_ldy(self, instr):
+        """LDY - Load Y Register"""
+        if instr.addr_mode == 2:
+            val = instr.operands[0] if instr.operands else 0
+            self.output.append(f"    /* LDY #${val:02X} */")
+            self.output.append(f"    runtime->machine.cpu.y = 0x{val:02X};")
+            self.output.append("    if (runtime->machine.cpu.y & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("    if (runtime->machine.cpu.y == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+            self.output.append("    runtime->scheduler.master_clock += 2;")
+        else:
+            self.output.append("    /* LDY memory - stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_stx(self, instr):
+        """STX - Store X Register"""
+        self.output.append("    /* STX - stub */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_sty(self, instr):
+        """STY - Store Y Register"""
+        self.output.append("    /* STY - stub */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_dec(self, instr):
+        """DEC - Decrement Memory"""
+        self.output.append("    /* DEC - stub */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_inx(self, instr):
+        """INX - Increment X"""
+        self.output.append("    /* INX */")
+        self.output.append("    runtime->machine.cpu.x = (runtime->machine.cpu.x + 1) & 0xFFFF;")
+        self.output.append("    if (runtime->machine.cpu.x & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.x == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_iny(self, instr):
+        """INY - Increment Y"""
+        self.output.append("    /* INY */")
+        self.output.append("    runtime->machine.cpu.y = (runtime->machine.cpu.y + 1) & 0xFFFF;")
+        self.output.append("    if (runtime->machine.cpu.y & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.y == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_pha(self, instr):
+        """PHA - Push Accumulator"""
+        self.output.append("    /* PHA */")
+        self.output.append("    stack_push(runtime, (uint8_t)runtime->machine.cpu.a);")
+        self.output.append("    runtime->scheduler.cpu_instructions += 3;")
+        self.output.append("    runtime->scheduler.master_clock += 3;")
+
+    def _emit_php(self, instr):
+        """PHP - Push Processor Status"""
+        self.output.append("    /* PHP */")
+        self.output.append("    stack_push(runtime, runtime->machine.cpu.status | 0x30);")
+        self.output.append("    runtime->scheduler.cpu_instructions += 3;")
+        self.output.append("    runtime->scheduler.master_clock += 3;")
+
+    def _emit_pla(self, instr):
+        """PLA - Pull Accumulator"""
+        self.output.append("    /* PLA */")
+        self.output.append("    {")
+        self.output.append("        uint8_t val = stack_pop(runtime);")
+        self.output.append("        runtime->machine.cpu.a = val;")
+        self.output.append("        if (val & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("        if (val == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("        runtime->scheduler.master_clock += 4;")
+        self.output.append("    }")
+
+    def _emit_plp(self, instr):
+        """PLP - Pull Processor Status"""
+        self.output.append("    /* PLP */")
+        self.output.append("    {")
+        self.output.append("        uint8_t status = stack_pop(runtime);")
+        self.output.append("        runtime->machine.cpu.status = (status & ~0x30) | 0x20;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("        runtime->scheduler.master_clock += 4;")
+        self.output.append("    }")
+
+    def _emit_plx(self, instr):
+        """PLX - Pull X"""
+        self.output.append("    /* PLX */")
+        self.output.append("    {")
+        self.output.append("        uint8_t val = stack_pop(runtime);")
+        self.output.append("        runtime->machine.cpu.x = val;")
+        self.output.append("        if (val & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("        if (val == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("        runtime->scheduler.master_clock += 4;")
+        self.output.append("    }")
+
+    def _emit_ply(self, instr):
+        """PLY - Pull Y"""
+        self.output.append("    /* PLY */")
+        self.output.append("    {")
+        self.output.append("        uint8_t val = stack_pop(runtime);")
+        self.output.append("        runtime->machine.cpu.y = val;")
+        self.output.append("        if (val & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("        if (val == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("        runtime->scheduler.master_clock += 4;")
+        self.output.append("    }")
+
+    def _emit_tax(self, instr):
+        """TAX - Transfer A to X"""
+        self.output.append("    /* TAX */")
+        self.output.append("    runtime->machine.cpu.x = runtime->machine.cpu.a;")
+        self.output.append("    if (runtime->machine.cpu.x & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.x == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_tay(self, instr):
+        """TAY - Transfer A to Y"""
+        self.output.append("    /* TAY */")
+        self.output.append("    runtime->machine.cpu.y = runtime->machine.cpu.a;")
+        self.output.append("    if (runtime->machine.cpu.y & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.y == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_txa(self, instr):
+        """TXA - Transfer X to A"""
+        self.output.append("    /* TXA */")
+        self.output.append("    runtime->machine.cpu.a = runtime->machine.cpu.x;")
+        self.output.append("    if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_tya(self, instr):
+        """TYA - Transfer Y to A"""
+        self.output.append("    /* TYA */")
+        self.output.append("    runtime->machine.cpu.a = runtime->machine.cpu.y;")
+        self.output.append("    if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_txs(self, instr):
+        """TXS - Transfer X to Stack"""
+        self.output.append("    /* TXS */")
+        self.output.append("    runtime->machine.cpu.sp = (uint8_t)runtime->machine.cpu.x;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_tsx(self, instr):
+        """TSX - Transfer Stack to X"""
+        self.output.append("    /* TSX */")
+        self.output.append("    runtime->machine.cpu.x = runtime->machine.cpu.sp;")
+        self.output.append("    if (runtime->machine.cpu.x & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.x == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_tdc(self, instr):
+        """TDC - Transfer Direct to A"""
+        self.output.append("    /* TDC */")
+        self.output.append("    runtime->machine.cpu.a = (uint8_t)runtime->machine.cpu.d;")
+        self.output.append("    if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_cld(self, instr):
+        """CLD - Clear Decimal"""
+        self.output.append("    /* CLD */")
+        self.output.append("    runtime->machine.cpu.status &= ~0x08;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_clc(self, instr):
+        """CLC - Clear Carry"""
+        self.output.append("    /* CLC */")
+        self.output.append("    runtime->machine.cpu.status &= ~0x01;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_sec(self, instr):
+        """SEC - Set Carry"""
+        self.output.append("    /* SEC */")
+        self.output.append("    runtime->machine.cpu.status |= 0x01;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_cli(self, instr):
+        """CLI - Clear Interrupt Disable"""
+        self.output.append("    /* CLI */")
+        self.output.append("    runtime->machine.cpu.status &= ~0x04;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_clv(self, instr):
+        """CLV - Clear Overflow"""
+        self.output.append("    /* CLV */")
+        self.output.append("    runtime->machine.cpu.status &= ~0x40;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_pld(self, instr):
+        """PLD - Pull Direct Page"""
+        self.output.append("    /* PLD */")
+        self.output.append("    runtime->machine.cpu.d = (uint16_t)(stack_pop(runtime) | (stack_pop(runtime) << 8));")
+        self.output.append("    runtime->scheduler.cpu_instructions += 6;")
+        self.output.append("    runtime->scheduler.master_clock += 6;")
+
+    def _emit_jmp(self, instr):
+        """JMP - Jump"""
+        self.output.append("    /* JMP */")
+        if len(instr.operands) >= 2:
+            target = instr.operands[0] | (instr.operands[1] << 8)
+            self.output.append(f"    /* JMP ${target:04X} */")
+            self.output.append(f"    runtime->machine.cpu.pc = 0x{target:04X}u;")
+            self.output.append("    runtime->scheduler.cpu_instructions += 3;")
+            self.output.append("    runtime->scheduler.master_clock += 3;")
+            self.output.append("    return;")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_jsr(self, instr):
+        """JSR - Jump to Subroutine"""
+        self.output.append("    /* JSR */")
+        if len(instr.operands) >= 2:
+            target = instr.operands[0] | (instr.operands[1] << 8)
+            self.output.append(f"    /* JSR ${target:04X} */")
+            self.output.append("    stack_push(runtime, (uint8_t)((runtime->machine.cpu.pc + 2) >> 8));")
+            self.output.append("    stack_push(runtime, (uint8_t)(runtime->machine.cpu.pc + 2));")
+            self.output.append(f"    runtime->machine.cpu.pc = 0x{target:04X}u;")
+            self.output.append("    runtime->scheduler.cpu_instructions += 6;")
+            self.output.append("    runtime->scheduler.master_clock += 6;")
+            self.output.append("    return;")
 def main():
     if len(sys.argv) < 2:
         print("Usage: python3 generate.py <rom_file>")
@@ -780,3 +1914,406 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+    # Additional opcode emitters for coverage
+    def _emit_eor(self, instr):
+        """EOR - Exclusive OR"""
+        self.output.append("    /* EOR */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_bmi(self, instr):
+        """BMI - Branch if Minus (N=1)"""
+        offset = instr.operands[0] if instr.operands else 0
+        if offset & 0x80: offset |= 0xFF00
+        target = (instr.address + instr.size + offset) & 0xFFFF
+        self.output.append(f"    /* BMI -> ${target:04X} if N=1 */")
+        self.output.append("    if ((runtime->machine.cpu.status & 0x80) != 0) {")
+        self.output.append(f"        runtime->machine.cpu.pc = 0x{target:04X}u;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("        runtime->scheduler.master_clock += 4;")
+        self.output.append("    } else {")
+        self.output.append("        runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("        runtime->scheduler.master_clock += 2;")
+        self.output.append("    }")
+        self.output.append("    return;")
+
+    def _emit_beq(self, instr):
+        """BEQ - Branch if Equal (Z=1)"""
+        offset = instr.operands[0] if instr.operands else 0
+        if offset & 0x80: offset |= 0xFF00
+        target = (instr.address + instr.size + offset) & 0xFFFF
+        self.output.append(f"    /* BEQ -> ${target:04X} if Z=1 */")
+        self.output.append("    if ((runtime->machine.cpu.status & 0x02) != 0) {")
+        self.output.append(f"        runtime->machine.cpu.pc = 0x{target:04X}u;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("        runtime->scheduler.master_clock += 4;")
+        self.output.append("    } else {")
+        self.output.append("        runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("        runtime->scheduler.master_clock += 2;")
+        self.output.append("    }")
+        self.output.append("    return;")
+
+    def _emit_dey(self, instr):
+        """DEY - Decrement Y"""
+        self.output.append("    /* DEY */")
+        self.output.append("    runtime->machine.cpu.y = (runtime->machine.cpu.y - 1) & 0xFFFF;")
+        self.output.append("    if (runtime->machine.cpu.y & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.y == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_dex(self, instr):
+        """DEX - Decrement X"""
+        self.output.append("    /* DEX */")
+        self.output.append("    runtime->machine.cpu.x = (runtime->machine.cpu.x - 1) & 0xFFFF;")
+        self.output.append("    if (runtime->machine.cpu.x & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.x == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_sbc(self, instr):
+        """SBC - Subtract with Carry"""
+        self.output.append("    /* SBC */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_sep(self, instr):
+        """SEP - Set Status Bits"""
+        mask = instr.operands[0] if instr.operands else 0
+        self.output.append(f"    /* SEP #${mask:02X} */")
+        self.output.append(f"    runtime->machine.cpu.status |= 0x{mask:02X};")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_rti(self, instr):
+        """RTI - Return from Interrupt"""
+        self.output.append("    /* RTI */")
+        self.output.append("    {")
+        self.output.append("        uint8_t status = stack_pop(runtime);")
+        self.output.append("        uint16_t pc_lo = stack_pop(runtime);")
+        self.output.append("        uint16_t pc_hi = stack_pop(runtime);")
+        self.output.append("        runtime->machine.cpu.pc = (uint16_t)((pc_hi << 8) | pc_lo);")
+        self.output.append("        runtime->machine.cpu.status = (status & ~0x30) | 0x20; /* clear B, set U */")
+        self.output.append("        runtime->scheduler.cpu_instructions += 6;")
+        self.output.append("        runtime->scheduler.master_clock += 6;")
+        self.output.append("        return;")
+        self.output.append("    }")
+
+    def _emit_phy(self, instr):
+        """PHY - Push Y"""
+        self.output.append("    /* PHY */")
+        self.output.append("    stack_push(runtime, (uint8_t)runtime->machine.cpu.y);")
+        self.output.append("    runtime->scheduler.cpu_instructions += 3;")
+        self.output.append("    runtime->scheduler.master_clock += 3;")
+
+    def _emit_php(self, instr):
+        """PHP - Push Processor Status"""
+        self.output.append("    /* PHP */")
+        self.output.append("    stack_push(runtime, runtime->machine.cpu.status | 0x30); /* B and U always 1 */")
+        self.output.append("    runtime->scheduler.cpu_instructions += 3;")
+        self.output.append("    runtime->scheduler.master_clock += 3;")
+
+    def _emit_mva(self, instr):
+        """MVA - Move Accumulator (placeholder)"""
+        self.output.append("    /* MVA - nop */")
+        self.output.append("    runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("    runtime->scheduler.master_clock += 4;")
+
+    def _emit_mvd(self, instr):
+        """MVD - Move Direct (placeholder)"""
+        self.output.append("    /* MVD - nop */")
+        self.output.append("    runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("    runtime->scheduler.master_clock += 4;")
+
+    def _emit_neg(self, instr):
+        """NEG - Negate (2's complement)"""
+        self.output.append("    /* NEG */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    # Additional opcode handlers
+    def _emit_lsr(self, instr):
+        """LSR - Logical Shift Right"""
+        if len(instr.operands) == 0:
+            self.output.append("    /* LSR A */")
+            self.output.append("    {")
+            self.output.append("        uint8_t val = runtime->machine.cpu.a;")
+            self.output.append("        uint8_t carry = val & 0x01;")
+            self.output.append("        runtime->machine.cpu.a = val >> 1;")
+            self.output.append("        if (carry) runtime->machine.cpu.status |= 0x01; else runtime->machine.cpu.status &= ~0x01;")
+            self.output.append("        if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 2;")
+            self.output.append("        runtime->scheduler.master_clock += 2;")
+            self.output.append("    }")
+        else:
+            self.output.append("    /* LSR memory - stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_rol(self, instr):
+        """ROL - Rotate Left"""
+        if len(instr.operands) == 0:
+            self.output.append("    /* ROL A */")
+            self.output.append("    {")
+            self.output.append("        uint8_t val = runtime->machine.cpu.a;")
+            self.output.append("        uint8_t carry = val & 0x80;")
+            self.output.append("        uint8_t new_carry = (runtime->machine.cpu.status & 0x01) != 0;")
+            self.output.append("        runtime->machine.cpu.a = (val << 1) | new_carry;")
+            self.output.append("        if (carry) runtime->machine.cpu.status |= 0x01; else runtime->machine.cpu.status &= ~0x01;")
+            self.output.append("        if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("        if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("        runtime->scheduler.cpu_instructions += 2;")
+            self.output.append("        runtime->scheduler.master_clock += 2;")
+            self.output.append("    }")
+        else:
+            self.output.append("    /* ROL memory - stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_adc(self, instr):
+        """ADC - Add with Carry"""
+        self.output.append("    /* ADC - stub */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_sbc(self, instr):
+        """SBC - Subtract with Carry"""
+        self.output.append("    /* SBC - stub */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_cmp(self, instr):
+        """CMP - Compare Accumulator"""
+        self.output.append("    /* CMP - stub */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_ldy(self, instr):
+        """LDY - Load Y Register"""
+        if instr.addr_mode == 2:
+            val = instr.operands[0] if instr.operands else 0
+            self.output.append(f"    /* LDY #${val:02X} */")
+            self.output.append(f"    runtime->machine.cpu.y = 0x{val:02X};")
+            self.output.append("    if (runtime->machine.cpu.y & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+            self.output.append("    if (runtime->machine.cpu.y == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+            self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+            self.output.append("    runtime->scheduler.master_clock += 2;")
+        else:
+            self.output.append("    /* LDY memory - stub */")
+            self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_stx(self, instr):
+        """STX - Store X Register"""
+        self.output.append("    /* STX - stub */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_sty(self, instr):
+        """STY - Store Y Register"""
+        self.output.append("    /* STY - stub */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_dec(self, instr):
+        """DEC - Decrement Memory"""
+        self.output.append("    /* DEC - stub */")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_inx(self, instr):
+        """INX - Increment X"""
+        self.output.append("    /* INX */")
+        self.output.append("    runtime->machine.cpu.x = (runtime->machine.cpu.x + 1) & 0xFFFF;")
+        self.output.append("    if (runtime->machine.cpu.x & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.x == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_iny(self, instr):
+        """INY - Increment Y"""
+        self.output.append("    /* INY */")
+        self.output.append("    runtime->machine.cpu.y = (runtime->machine.cpu.y + 1) & 0xFFFF;")
+        self.output.append("    if (runtime->machine.cpu.y & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.y == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_pha(self, instr):
+        """PHA - Push Accumulator"""
+        self.output.append("    /* PHA */")
+        self.output.append("    stack_push(runtime, (uint8_t)runtime->machine.cpu.a);")
+        self.output.append("    runtime->scheduler.cpu_instructions += 3;")
+        self.output.append("    runtime->scheduler.master_clock += 3;")
+
+    def _emit_php(self, instr):
+        """PHP - Push Processor Status"""
+        self.output.append("    /* PHP */")
+        self.output.append("    stack_push(runtime, runtime->machine.cpu.status | 0x30);")
+        self.output.append("    runtime->scheduler.cpu_instructions += 3;")
+        self.output.append("    runtime->scheduler.master_clock += 3;")
+
+    def _emit_pla(self, instr):
+        """PLA - Pull Accumulator"""
+        self.output.append("    /* PLA */")
+        self.output.append("    {")
+        self.output.append("        uint8_t val = stack_pop(runtime);")
+        self.output.append("        runtime->machine.cpu.a = val;")
+        self.output.append("        if (val & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("        if (val == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("        runtime->scheduler.master_clock += 4;")
+        self.output.append("    }")
+
+    def _emit_plp(self, instr):
+        """PLP - Pull Processor Status"""
+        self.output.append("    /* PLP */")
+        self.output.append("    {")
+        self.output.append("        uint8_t status = stack_pop(runtime);")
+        self.output.append("        runtime->machine.cpu.status = (status & ~0x30) | 0x20;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("        runtime->scheduler.master_clock += 4;")
+        self.output.append("    }")
+
+    def _emit_plx(self, instr):
+        """PLX - Pull X"""
+        self.output.append("    /* PLX */")
+        self.output.append("    {")
+        self.output.append("        uint8_t val = stack_pop(runtime);")
+        self.output.append("        runtime->machine.cpu.x = val;")
+        self.output.append("        if (val & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("        if (val == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("        runtime->scheduler.master_clock += 4;")
+        self.output.append("    }")
+
+    def _emit_ply(self, instr):
+        """PLY - Pull Y"""
+        self.output.append("    /* PLY */")
+        self.output.append("    {")
+        self.output.append("        uint8_t val = stack_pop(runtime);")
+        self.output.append("        runtime->machine.cpu.y = val;")
+        self.output.append("        if (val & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("        if (val == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("        runtime->scheduler.cpu_instructions += 4;")
+        self.output.append("        runtime->scheduler.master_clock += 4;")
+        self.output.append("    }")
+
+    def _emit_tax(self, instr):
+        """TAX - Transfer A to X"""
+        self.output.append("    /* TAX */")
+        self.output.append("    runtime->machine.cpu.x = runtime->machine.cpu.a;")
+        self.output.append("    if (runtime->machine.cpu.x & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.x == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_tay(self, instr):
+        """TAY - Transfer A to Y"""
+        self.output.append("    /* TAY */")
+        self.output.append("    runtime->machine.cpu.y = runtime->machine.cpu.a;")
+        self.output.append("    if (runtime->machine.cpu.y & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.y == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_txa(self, instr):
+        """TXA - Transfer X to A"""
+        self.output.append("    /* TXA */")
+        self.output.append("    runtime->machine.cpu.a = runtime->machine.cpu.x;")
+        self.output.append("    if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_tya(self, instr):
+        """TYA - Transfer Y to A"""
+        self.output.append("    /* TYA */")
+        self.output.append("    runtime->machine.cpu.a = runtime->machine.cpu.y;")
+        self.output.append("    if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_txs(self, instr):
+        """TXS - Transfer X to Stack"""
+        self.output.append("    /* TXS */")
+        self.output.append("    runtime->machine.cpu.sp = (uint8_t)runtime->machine.cpu.x;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_tsx(self, instr):
+        """TSX - Transfer Stack to X"""
+        self.output.append("    /* TSX */")
+        self.output.append("    runtime->machine.cpu.x = runtime->machine.cpu.sp;")
+        self.output.append("    if (runtime->machine.cpu.x & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.x == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_tdc(self, instr):
+        """TDC - Transfer Direct to A"""
+        self.output.append("    /* TDC */")
+        self.output.append("    runtime->machine.cpu.a = (uint8_t)runtime->machine.cpu.d;")
+        self.output.append("    if (runtime->machine.cpu.a & 0x80) runtime->machine.cpu.status |= 0x80; else runtime->machine.cpu.status &= ~0x80;")
+        self.output.append("    if (runtime->machine.cpu.a == 0) runtime->machine.cpu.status |= 0x02; else runtime->machine.cpu.status &= ~0x02;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_cld(self, instr):
+        """CLD - Clear Decimal"""
+        self.output.append("    /* CLD */")
+        self.output.append("    runtime->machine.cpu.status &= ~0x08;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_clc(self, instr):
+        """CLC - Clear Carry"""
+        self.output.append("    /* CLC */")
+        self.output.append("    runtime->machine.cpu.status &= ~0x01;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_sec(self, instr):
+        """SEC - Set Carry"""
+        self.output.append("    /* SEC */")
+        self.output.append("    runtime->machine.cpu.status |= 0x01;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_cli(self, instr):
+        """CLI - Clear Interrupt Disable"""
+        self.output.append("    /* CLI */")
+        self.output.append("    runtime->machine.cpu.status &= ~0x04;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_clv(self, instr):
+        """CLV - Clear Overflow"""
+        self.output.append("    /* CLV */")
+        self.output.append("    runtime->machine.cpu.status &= ~0x40;")
+        self.output.append("    runtime->scheduler.cpu_instructions += 2;")
+        self.output.append("    runtime->scheduler.master_clock += 2;")
+
+    def _emit_pld(self, instr):
+        """PLD - Pull Direct Page"""
+        self.output.append("    /* PLD */")
+        self.output.append("    runtime->machine.cpu.d = (uint16_t)(stack_pop(runtime) | (stack_pop(runtime) << 8));")
+        self.output.append("    runtime->scheduler.cpu_instructions += 6;")
+        self.output.append("    runtime->scheduler.master_clock += 6;")
+
+    def _emit_jmp(self, instr):
+        """JMP - Jump"""
+        self.output.append("    /* JMP */")
+        if len(instr.operands) >= 2:
+            target = instr.operands[0] | (instr.operands[1] << 8)
+            self.output.append(f"    /* JMP ${target:04X} */")
+            self.output.append(f"    runtime->machine.cpu.pc = 0x{target:04X}u;")
+            self.output.append("    runtime->scheduler.cpu_instructions += 3;")
+            self.output.append("    runtime->scheduler.master_clock += 3;")
+            self.output.append("    return;")
+        self.output.append("    runtime->route_failed = 1; return;")
+
+    def _emit_jsr(self, instr):
+        """JSR - Jump to Subroutine"""
+        self.output.append("    /* JSR */")
+        if len(instr.operands) >= 2:
+            target = instr.operands[0] | (instr.operands[1] << 8)
+            self.output.append(f"    /* JSR ${target:04X} */")
+            self.output.append("    stack_push(runtime, (uint8_t)((runtime->machine.cpu.pc + 2) >> 8));")
+            self.output.append("    stack_push(runtime, (uint8_t)(runtime->machine.cpu.pc + 2));")
+            self.output.append(f"    runtime->machine.cpu.pc = 0x{target:04X}u;")
+            self.output.append("    runtime->scheduler.cpu_instructions += 6;")
+            self.output.append("    runtime->scheduler.master_clock += 6;")
+            self.output.append("    return;")
+        self.output.append("    runtime->route_failed = 1; return;")
