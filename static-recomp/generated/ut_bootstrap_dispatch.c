@@ -260,3 +260,8 @@ static void handle_rti(SCV11Runtime *r) {
     r->machine.cpu.status = (uint8_t)(status | 0x30); /* B and U always 1 */
 }
 
+
+/* Stub - delegates to main CPU step */
+int ut_bootstrap_step(SCV11Runtime *runtime) {
+    return sc_v11_cpu_step(runtime);
+}
