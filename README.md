@@ -47,36 +47,23 @@ The SDL2 frontend window opens but renders only the SNES backdrop color (black/b
 
 ## About the Game
 
-*Utopia: The Creation of a Nation* (SNES, 1993, Jaleco) is a **colonial city-building simulation** set in the **16th–18th century Americas** (not space). You govern a colonial settlement, managing resources, population, trade, military, and diplomacy across procedurally generated islands. Features:
+*Utopia: The Creation of a Nation* (1991, Celestial Software / Gremlin Interactive) is a **real-time strategy / city-building simulation** with a **sci-fi / space colonization** setting. The SNES port (USA, 1993, published by Jaleco) supports the **Super NES Mouse**.
 
-- **Deep economic simulation** — production chains, resource transport, market prices
-- **Turn-based strategy** — each turn = 1 year, with seasonal events
-- **Multi-island maps** — explore, colonize, and connect settlements
-- **Diplomacy & warfare** — negotiate with rival colonial powers or fight them
-- **Disasters & events** — storms, plagues, fires, native relations
+**Setting:** The game takes place in the future on a new planet. You play a planetary governor evacuating a colony hit by an alien biological weapon. Your objective: colonize the new planet, manage the colony, and raise quality of life to reach utopia — while competing against an alien race colonizing the same planet.
 
-The SNES port (USA, 8 Mbit LoROM, no co-processor) is a faithful port of the PC/Amiga original, with simplified controls and SNES-tuned UI.
+**Key features:**
+- **Real-time strategy / city-building** — build infrastructure, manage resources, population, taxes, trade
+- **Micromanagement** — tax rate, birth rate, production chains, personnel allocation
+- **Competition** — an alien race colonizes the same planet; no alliances possible, conflict inevitable
+- **Espionage** — alien cities are off-map; rely on espionage to gather intelligence
+- **10 scenarios** — each with a different planet and alien race (Eldorians, Vroarscans, Soomanii, etc.)
+- **Isometric graphics** — built with Deluxe Paint
+- **SNES Mouse support** — the SNES port supports the Super NES Mouse peripheral
+- **Expansion disk** — *Utopia: The New Worlds* adds 10 more scenarios (e.g., Sal-Kadeem with oil-covered terrain)
 
-Utopia's executable W65C816 game instructions were analysed and translated
-into generated native C before the application was built. Production dispatch
-uses exact processor-state and program-counter contexts. It contains no
-general-purpose SNES CPU interpreter, runtime opcode decoder, dynamic
-recompiler, JIT, or automatic emulator fallback.
+The SNES port (USA, 8 Mbit LoROM, no co-processor) was published by Jaleco and supports the Super NES Mouse peripheral.
 
-Game simulation, graphics, samples, music and effects are not prerecorded.
-They remain live state driven by the external ROM, cartridge memory, WRAM,
-VRAM, controller input and SNES timing.
-
-The complete runtime includes:
-- Generated exact-context W65C816 game-code dispatch.
-- Native cartridge, WRAM, bus, DMA, HDMA, controller and CPU-I/O handling.
-- Native PPU registers, scanline events, rendering and framebuffer output.
-- Exact rational NTSC scheduling and one guest frame per host deadline.
-- Exact fail-closed S-SMP AOT and project-owned S-DSP.
-- Battery SRAM and deterministic snapshots.
-- A Linux frontend (SDL2, windowed) with gamepad support.
-
-## Linux frontend
+## What fully static recompilation means
 
 ```bash
 ./utopia-linux --rom /path/to/Utopia\ \(USA\).sfc
