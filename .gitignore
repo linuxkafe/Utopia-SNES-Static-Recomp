@@ -30,3 +30,5 @@ __pycache__/
 # AES local only - never push to git
 .aes/
 aes/
+# ROM and extracted data (never commit)
+rom/extracted/

@@ -7,7 +7,7 @@ are supported; the core builds on both platforms.
 The original game ROM is not included. Use an externally supplied, legally
 obtained ROM matching `ROM-REQUIREMENTS.txt`.
 
-## Current Status (as of 2024-10-12)
+## Current Status (as of 2026-10-13)
 
 | Component | Status | Details |
 |-----------|--------|---------|
@@ -34,6 +34,28 @@ All 9 tickets from peer review round 2 (T017–T025) completed:
 - T023: Tests verify static path (hash_count fixed, REFERENCE_HASHES populated, --verify wired)
 - T024: Binary search dispatch table (O(log n) lookup vs linear scan)
 - T025: Kanban/docs claims updated to reflect real opcode semantics
+
+### Is the game playable?
+
+**Not yet.** The static recompilation core is functional and passes 300-frame headless tests (601K instructions/frame, no route failures), but the following critical components are **stubs only**:
+
+- **PPU Renderer** — no visible output yet (stub implementation)
+- **S-DSP (32-phase)** — no audio output yet (stub implementation)  
+- **S-SMP AOT Compilation** — S-SMP code translated but not yet integrated
+
+The SDL2 frontend window opens but renders a blank screen. The headless test is the current verification gate.
+
+## About the Game
+
+*Utopia: The Creation of a Nation* (SNES, 1993) is a city-building simulation by Jaleco. You govern a colonial settlement from the 16th to 18th century, managing resources, population, trade, military, and diplomacy across randomly generated islands. The game features:
+
+- **Deep economic simulation** — production chains, resource transport, market prices
+- **Turn-based strategy** — each turn = 1 year, with seasonal events
+- **Multi-island maps** — explore, colonize, and connect settlements
+- **Diplomacy & warfare** — negotiate with rival powers or fight them
+- **Disasters & events** — storms, plagues, fires, native relations
+
+The SNES port (USA, 8 Mbit LoROM, no co-processor) is a faithful port of the PC/Amiga original, with simplified controls and SNES-tuned UI.
 
 ## What fully static recompilation means
 
