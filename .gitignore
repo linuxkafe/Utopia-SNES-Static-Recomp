@@ -27,3 +27,6 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+# AES local only - never push to git
+.aes/
+aes/
