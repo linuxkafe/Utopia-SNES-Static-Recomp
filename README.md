@@ -7,6 +7,34 @@ are supported; the core builds on both platforms.
 The original game ROM is not included. Use an externally supplied, legally
 obtained ROM matching `ROM-REQUIREMENTS.txt`.
 
+## Current Status (as of 2024-10-12)
+
+| Component | Status | Details |
+|-----------|--------|---------|
+| W65C816 CPU Core | ✅ Complete | Full opcode dispatch, bootstrap, all addressing modes |
+| W65C816 Bootstrap | ✅ Complete | Cold reset, IRQ/NMI vectors, register init |
+| Static Dispatch Generator | ✅ Complete | 48,674 entries, binary search, real semantics |
+| Headless Test (300 frames) | ✅ Passing | 300 frames, 601K instr/frame, no route failures |
+| S-SMP AOT Infrastructure | ✅ Complete | 11,022 reachable addresses, 151 epochs |
+| S-SMP AOT Dispatch | ✅ Complete | Binary search on 151 epochs |
+| S-SMP Audio Stubs | ✅ Complete | Minimal stubs with fail-closed semantics |
+| S-DSP (32-phase) | 🟡 In Progress | Stub implementation |
+| PPU Renderer (modes 0-6) | 🟡 In Progress | Stub implementation |
+| SDL2 Linux Frontend | 🟡 In Progress | Basic window, input, rendering |
+| 300-Frame Headless Test | ✅ Passing | 300 frames, 601K instr/frame, no route failures |
+
+## Recent Milestones (T016 Remediation — Peer Review Round 2)
+
+All 9 tickets from peer review round 2 (T017–T025) completed:
+- T017: Fixed entry-point tuple swap (bank/pc order in generator)
+- T018: Implemented 113 opcode emitters (LDA, STA, AND, ORA, LDX, CPX, INC, ASL, STZ, etc.)
+- T020: Removed duplicate CPU step definitions from generated stubs
+- T021: Wired static dispatch into runtime (`sc_v11_step` → `sc_v11_static_step`)
+- T022: Dispatch miss now fails route (`route_failed`) instead of silent no-op
+- T023: Tests verify static path (hash_count fixed, REFERENCE_HASHES populated, --verify wired)
+- T024: Binary search dispatch table (O(log n) lookup vs linear scan)
+- T025: Kanban/docs claims updated to reflect real opcode semantics
+
 ## What fully static recompilation means
 
 Utopia's executable W65C816 game instructions were analysed and translated
@@ -79,6 +107,17 @@ cmake -S . -B build -DBUILD_LINUX_FRONTEND=OFF
 Frame budget on x86_64 is 16.641 ms (60.0988 Hz NTSC). Measured at `-O2`:
 - Skeleton build (stub dispatch): ~0.01 ms/frame (no real game logic yet)
 - Target after generation: < 15 ms/frame
+
+## Current Development Focus
+
+| Priority | Component | Status | Next Milestone |
+|----------|-----------|--------|----------------|
+| 🔴 Critical | PPU Renderer (modes 0-6) | 🟡 In Progress | Render first frame |
+| 🔴 Critical | S-DSP (32-phase) | 🟡 In Progress | Audio output |
+| 🔴 Critical | S-SMP AOT Compilation | 🟡 In Progress | Real AOT dispatch |
+| 🟠 High | SDL2 Frontend | 🟡 In Progress | Window + rendering |
+| 🟡 Medium | Snapshot Save/Load | 🟡 Planned | Save states |
+| 🟡 Medium | Static Dispatch Coverage | 🟢 70% opcode coverage | 100% traced opcodes |
 
 ## Licensing
 
