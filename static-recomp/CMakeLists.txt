@@ -103,7 +103,7 @@ if(BUILD_TESTING)
         target_compile_options(utopia-static-audio-purity PRIVATE
             -Wall -Wextra -Wpedantic -Werror)
     endif()
-    add_test(NAME utopia-static-audio-purity COMMAND utopia-static-audio-purity)
+    add_test(NAME utopia-static-audio-purity COMMAND utopia-static-audio-purity "${UTOPIA_TEST_ROM}")
 
     set(UTOPIA_TEST_ROM "" CACHE FILEPATH
         "Optional exact Utopia USA ROM used only by local integration tests")

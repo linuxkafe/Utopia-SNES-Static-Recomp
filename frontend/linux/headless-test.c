@@ -17,10 +17,11 @@ static uint32_t fnv1a_hash(const uint32_t *data, size_t len) {
     return hash;
 }
 
-/* Reference frame hashes for first 10 frames (to be populated on first run) */
-static const uint32_t REFERENCE_HASHES[10] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-};
+/* Reference frame hashes for first 10 frames (captured from static dispatch) */
+    static const uint32_t REFERENCE_HASHES[10] = {
+        0x05AACDC5, 0x05AACDC5, 0x05AACDC5, 0x05AACDC5, 0x05AACDC5,
+        0x05AACDC5, 0x05AACDC5, 0x05AACDC5, 0x05AACDC5, 0x05AACDC5
+    };
 
 int main(int argc, char **argv) {
     if (argc < 3) {
@@ -87,6 +88,7 @@ int main(int argc, char **argv) {
             const uint32_t *fb = utopia_recomp_frame_bgra(game);
             uint32_t w = utopia_recomp_frame_width(game);
             frame_hashes[completed - 1] = fnv1a_hash(fb, w * 239);
+            hash_count = completed;
         }
 
         /* Drain PCM */
@@ -116,9 +118,9 @@ int main(int argc, char **argv) {
         }
 
         /* Print frame hashes for reference */
-        if (hash_count == 0) {
-            printf("\nFrame hashes (first 10):\n");
-            for (int i = 0; i < 10 && i < (int)completed; i++) {
+        if (hash_count > 0) {
+            printf("\nFrame hashes (first %d):\n", hash_count);
+            for (int i = 0; i < hash_count && i < (int)completed; i++) {
                 printf("  Frame %d: 0x%08X\n", i + 1, frame_hashes[i]);
             }
         }
